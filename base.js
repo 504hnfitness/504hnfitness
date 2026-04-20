@@ -221,7 +221,7 @@ const descargarPDF = (blob, receiptNo, nombre) => {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 };
 
-const FORM_EMPTY = { nombre:'', plan:'Mensual', telefono:'', metodo:'Efectivo' };
+const FORM_EMPTY = { nombre:'', plan:'Mensual', telefono:'', metodo:'Efectivo', fechaIngreso:new Date().toISOString().split('T')[0] };
 
 /* ============================================================
    LOADING SCREEN
@@ -922,7 +922,7 @@ const ClientesPanel = ({ clientes, setClientes }) => {
   const [confirmId,setConfirmId]=useState(null); const [deleting,setDeleting]=useState(false);
   const [pagoClient,setPagoClient]=useState(null); const [toast,setToast]=useState(null);
 
-  const vencePreview=calcVence(form.plan);
+  const vencePreview=calcVence(form.plan, form.fechaIngreso);
   const estadoLabel={'al-dia':'AL DIA','vencido':'VENCIDO','proximo':'POR VENCER'};
   const showToast=(msg,tipo='ok')=>{setToast({msg,tipo});setTimeout(()=>setToast(null),5000);};
   const filtered=clientes.filter(c=>c.nombre.toLowerCase().includes(search.toLowerCase())||c.plan.toLowerCase().includes(search.toLowerCase()));
@@ -940,7 +940,7 @@ const ClientesPanel = ({ clientes, setClientes }) => {
       else{showToast('Error al actualizar','error');console.error(error);}
       setForm(FORM_EMPTY);setShowForm(false);setFormMode('add');setEditId(null);
     } else {
-      const vence=calcVence(form.plan); const hoy=todayStr(); const monto=PLAN_MAP[form.plan]?.monto||0;
+      const hoy=form.fechaIngreso||todayStr(); const vence=calcVence(form.plan, hoy); const monto=PLAN_MAP[form.plan]?.monto||0;
       const{data:c,error:cErr}=await db.from('clientes').insert([{nombre:form.nombre,plan:form.plan,telefono:form.telefono,estado:'al-dia',vence}]).select().single();
       if(cErr){setSaving(false);showToast('Error al crear el cliente','error');console.error(cErr);return;}
       await db.from('pagos').insert([{cliente_id:c.id,cliente_nombre:c.nombre,plan:form.plan,monto,metodo:form.metodo,fecha:hoy,vence_hasta:vence}]);
@@ -1002,6 +1002,17 @@ const ClientesPanel = ({ clientes, setClientes }) => {
                   <select className="form-select" value={form.metodo} onChange={e=>setForm({...form,metodo:e.target.value})}>
                     {METODOS.map(m=><option key={m}>{m}</option>)}
                   </select>
+                </div>
+              )}
+              {formMode==='add'&&(
+                <div className="field-group" style={{marginBottom:0}}>
+                  <label className="field-label" style={{color:'var(--gold)'}}>📅 Fecha de ingreso / primer pago</label>
+                  <input type="date" className="field-input" value={form.fechaIngreso}
+                    onChange={e=>setForm({...form,fechaIngreso:e.target.value})}
+                    style={{border:'1px solid rgba(245,197,24,0.4)',background:'var(--gold-bg)'}}/>
+                  <div style={{fontSize:11,color:'var(--gray-700)',marginTop:4}}>
+                    Por defecto hoy — cámbiala para registrar clientes anteriores.
+                  </div>
                 </div>
               )}
             </div>
