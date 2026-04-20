@@ -13,7 +13,7 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const PLANES = [
   { nombre:'Diario',     monto:50,   duracion:'1 dia',    meses:1,  color:'#4299e1' },
   { nombre:'Mensual',    monto:500,  duracion:'1 mes',    meses:1,  color:'#38a169' },
-  { nombre:'Trimestral', monto:1350, duracion:'3 meses',  meses:3,  color:'#805ad5' },
+  { nombre:'Quincenal',  monto:300,  duracion:'15 dias',  meses:1,  color:'#805ad5' },
   { nombre:'Anual',      monto:4800, duracion:'12 meses', meses:12, color:'#f5c518' },
 ];
 const PLAN_MAP   = Object.fromEntries(PLANES.map(p => [p.nombre, p]));
@@ -30,7 +30,7 @@ const calcVence = (plan, fromDate = null) => {
   switch (plan) {
     case 'Diario':     d.setDate(d.getDate() + 1);         break;
     case 'Mensual':    d.setMonth(d.getMonth() + 1);       break;
-    case 'Trimestral': d.setMonth(d.getMonth() + 3);       break;
+    case 'Quincenal':  d.setDate(d.getDate() + 15);        break;
     case 'Anual':      d.setFullYear(d.getFullYear() + 1); break;
   }
   return d.toISOString().split('T')[0];
@@ -87,7 +87,7 @@ const distribuirPago = (pago) => {
 };
 
 /* ─── GENERAR PDF (jsPDF) ────────────────────────────── */
-const generarPDFRecibo = (client, planPago, monto, metodo, fecha, venceActualizado) => {
+const generarPDFRecibo = (client, planPago, monto, metodo, fecha, venceActualizado, cuotaInscripcion=0, montoBase=monto, recargoPDF=0) => {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'mm', format:'a4' });
   const W = 210, pad = 20;
@@ -160,6 +160,13 @@ const generarPDFRecibo = (client, planPago, monto, metodo, fecha, venceActualiza
   fila('Fecha de pago', fmtFechaLarga(fecha));
   fila('Membresia valida hasta', fmtFechaLarga(venceActualizado), [38,161,105]);
   fila('Metodo de pago', metodo);
+  if(cuotaInscripcion>0){
+    fila('Membresia mensual', 'L. ' + fmtMonto(montoBase));
+    fila('Cuota de inscripcion anual', 'L. ' + fmtMonto(cuotaInscripcion), [245,197,24]);
+  }
+  if(recargoPDF>0){
+    fila('Recargo por pago tardio (+5 dias)', 'L. ' + fmtMonto(recargoPDF), [252,129,129]);
+  }
 
   y += 2;
   doc.setFillColor(240,255,248);
@@ -271,21 +278,40 @@ const ConfirmModal = ({ nombre, loading, onConfirm, onCancel }) => (
 const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
   const [planPago,  setPlanPago]  = useState(client.plan);
   const [metodo,    setMetodo]    = useState('Efectivo');
-  const [fecha,     setFecha]     = useState(todayStr());
+  const [fechaPago, setFechaPago] = useState(todayStr());
+  const [fechaVence,setFechaVence]= useState('');
+  const [recargo,   setRecargo]   = useState(0);
   const [guardando, setGuardando] = useState(false);
 
   const plan      = PLAN_MAP[planPago];
-  const monto     = plan.monto;
+  const montoBase = plan.monto;
   const isVencido = calcEstado(client.vence) === 'vencido';
-  const newVence  = calcVence(planPago, isVencido ? null : client.vence);
   const estadoAct = calcEstado(client.vence);
+
+  /* Calcular vencimiento base y recargo cada vez que cambian fechaPago o planPago */
+  const venceBase = React.useMemo(()=> calcVence(planPago, isVencido ? fechaPago : client.vence), [planPago, fechaPago, isVencido, client.vence]);
+
+  /* Inicializar fechaVence cuando cambia venceBase */
+  React.useEffect(()=>{ setFechaVence(venceBase); }, [venceBase]);
+
+  /* Recargo: si el cliente tiene vencimiento previo y fechaPago > vence+5 días */
+  React.useEffect(()=>{
+    if(!client.vence) return;
+    const vencePrev = new Date(client.vence + 'T00:00:00');
+    const limite    = new Date(vencePrev); limite.setDate(limite.getDate() + 5);
+    const pagado    = new Date(fechaPago  + 'T00:00:00');
+    setRecargo(pagado > limite ? 50 : 0);
+  }, [fechaPago, client.vence]);
+
+  const newVence = fechaVence || venceBase;
+  const monto    = montoBase + recargo;
 
   const handleConfirmarPago = async () => {
     setGuardando(true);
 
     await db.from('pagos').insert([{
       cliente_id:client.id, cliente_nombre:client.nombre,
-      plan:planPago, monto, metodo, fecha, vence_hasta:newVence,
+      plan:planPago, monto, metodo, fecha:fechaPago, vence_hasta:newVence,
     }]);
 
     const { data, error } = await db.from('clientes')
@@ -299,7 +325,7 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
     onClose();
 
     try {
-      const { doc, receiptNo } = generarPDFRecibo(client, planPago, monto, metodo, fecha, newVence);
+      const { doc, receiptNo } = generarPDFRecibo(client, planPago, monto, metodo, fechaPago, newVence, 0, montoBase, recargo);
       descargarPDF(doc.output('blob'), receiptNo, client.nombre);
       showToastFn(`Pago registrado. Recibo descargado para ${client.nombre.split(' ')[0]}.`,'ok');
     } catch(err) {
@@ -342,7 +368,7 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
           </div>
         </div>
 
-        <div style={{background:'var(--gray-900)',border:'1px solid var(--gray-800)',padding:'12px 18px',marginBottom:isVencido?0:20,display:'flex',gap:20,flexWrap:'wrap',alignItems:'center'}}>
+        <div style={{background:'var(--gray-900)',border:'1px solid var(--gray-800)',padding:'12px 18px',marginBottom:8,display:'flex',gap:20,flexWrap:'wrap',alignItems:'center'}}>
           <div>
             <div style={{fontSize:9,color:'var(--gray-700)',marginBottom:3,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.15em',textTransform:'uppercase'}}>Vence actualmente</div>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:'var(--gray-400)'}}>{fmtFecha(client.vence)}</div>
@@ -354,10 +380,11 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
           </div>
           <div style={{marginLeft:'auto',textAlign:'right'}}>
             <div style={{fontSize:9,color:'var(--gray-700)',marginBottom:3,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.15em',textTransform:'uppercase'}}>Monto a cobrar</div>
-            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:26,color:'var(--gold)',lineHeight:1}}>L. {monto.toLocaleString('es-HN')}</div>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:26,color:recargo>0?'#fc8181':'var(--gold)',lineHeight:1}}>L. {monto.toLocaleString('es-HN')}</div>
+            {recargo>0&&<div style={{fontSize:11,color:'#fc8181',marginTop:2}}>Incluye recargo L. 50 por pago tardío</div>}
           </div>
         </div>
-        {isVencido&&<p style={{fontSize:12,color:'#fc8181',margin:'8px 0 20px'}}>Membresia vencida — la renovacion parte desde hoy.</p>}
+        {isVencido&&<p style={{fontSize:12,color:'#fc8181',margin:'4px 0 8px'}}>Membresía vencida — la renovación parte desde la fecha de pago.</p>}
 
         <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:4}}>
           <div className="field-group" style={{marginBottom:0}}>
@@ -367,14 +394,34 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
             </select>
           </div>
           <div className="field-group" style={{marginBottom:0}}>
-            <label className="field-label">Fecha de pago</label>
-            <input type="date" className="field-input" value={fecha} onChange={e=>setFecha(e.target.value)}/>
+            <label className="field-label" style={{color:'var(--gold)'}}>📅 Fecha de pago</label>
+            <input type="date" className="field-input" value={fechaPago}
+              onChange={e=>setFechaPago(e.target.value)}
+              style={{border:'1px solid rgba(245,197,24,0.4)',background:'var(--gold-bg)'}}/>
+          </div>
+          <div className="field-group" style={{marginBottom:0,gridColumn:'1/-1'}}>
+            <label className="field-label" style={{color:'var(--gold)'}}>
+              📆 Membresía válida hasta — editable si acuerdan fecha diferente
+            </label>
+            <input type="date" className="field-input" value={fechaVence}
+              onChange={e=>setFechaVence(e.target.value)}
+              style={{border:'1px solid rgba(245,197,24,0.3)',background:'var(--gold-bg)'}}/>
+            <div style={{fontSize:11,color:'var(--gray-700)',marginTop:4}}>
+              Calculado automáticamente según plan. Puedes ajustarlo manualmente.
+            </div>
           </div>
         </div>
 
+        {recargo>0&&(
+          <div style={{background:'rgba(252,129,129,0.08)',border:'1px solid rgba(252,129,129,0.3)',padding:'10px 16px',marginBottom:8,fontSize:13,color:'#fc8181',display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontSize:18}}>⚠️</span>
+            <span>Pago con más de 5 días de retraso — se aplica recargo de <strong>L. 50.00</strong>. Total: <strong>L. {monto.toLocaleString('es-HN')}</strong></span>
+          </div>
+        )}
+
         <div className="modal-actions">
           <button className="btn-primary" onClick={handleConfirmarPago} disabled={guardando}>
-            {guardando?'Registrando...':`Confirmar · L. ${monto.toLocaleString('es-HN')} — Descargar recibo PDF`}
+            {guardando?'Registrando...':`Confirmar · L. ${monto.toLocaleString('es-HN')}${recargo>0?' (incl. recargo)':''} — Descargar recibo PDF`}
           </button>
           <button className="btn-outline" onClick={onClose} disabled={guardando}>Cancelar</button>
         </div>
@@ -389,7 +436,7 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
    ============================================================ */
 const LoginPage = ({ onLogin }) => {
   const [pass,setPass]=useState(''); const [error,setError]=useState('');
-  const handleLogin=(e)=>{ e.preventDefault(); if(pass==='Diosesamor'){onLogin();}else{setError('Contraseña incorrecta.');} };
+  const handleLogin=(e)=>{ e.preventDefault(); if(pass==='504admin'){onLogin();}else{setError('Contraseña incorrecta.');} };
   return(
     <div className="login-screen">
       <nav className="nav">
@@ -856,7 +903,7 @@ const GananciasPanel = () => {
           <div style={{marginTop:20,background:'var(--gray-950)',border:'1px solid var(--gray-900)',padding:'14px 18px',fontSize:12,color:'var(--gray-400)',lineHeight:1.8}}>
             <strong style={{color:'var(--gray-200)',fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.1em',textTransform:'uppercase',fontSize:11}}>Reglas de distribución de ingresos</strong><br/>
             <span style={{color:'#4299e1'}}>● Diario / Mensual</span> — El monto completo se registra en el mes del pago.<br/>
-            <span style={{color:'#805ad5'}}>● Trimestral</span> — El monto total se divide entre 3 y se distribuye en los 3 meses que cubre la membresía.<br/>
+            <span style={{color:'#805ad5'}}>● Quincenal</span> — El monto completo se registra en el mes del pago (15 días).<br/>
             <span style={{color:'var(--gold)'}}>● Anual</span> — El monto total se divide entre 12 y se distribuye en los 12 meses que cubre la membresía.
           </div>
         </>
@@ -1067,7 +1114,5 @@ const App = () => {
   const [isLoggedIn,setIsLoggedIn]=useState(false);
   return isLoggedIn ? <AdminPanel onLogout={()=>setIsLoggedIn(false)}/> : <LoginPage onLogin={()=>setIsLoggedIn(true)}/>;
 };
-
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
