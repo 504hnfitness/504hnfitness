@@ -436,7 +436,7 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
    ============================================================ */
 const LoginPage = ({ onLogin }) => {
   const [pass,setPass]=useState(''); const [error,setError]=useState('');
-  const handleLogin=(e)=>{ e.preventDefault(); if(pass==='504admin'){onLogin();}else{setError('Contraseña incorrecta.');} };
+  const handleLogin=(e)=>{ e.preventDefault(); if(pass==='Diosesamor'){onLogin();}else{setError('Contraseña incorrecta.');} };
   return(
     <div className="login-screen">
       <nav className="nav">
