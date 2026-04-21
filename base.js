@@ -1,5 +1,5 @@
 /* =====================================================
-   504HNFITNESS — base.js
+   504HNFITNESS — base.js (Versión Corregida)
    ===================================================== */
 
 const { useState, useEffect, useMemo } = React;
@@ -36,11 +36,23 @@ const calcVence = (plan, fromDate = null) => {
   return d.toISOString().split('T')[0];
 };
 
+/**
+ * CORRECCIÓN: calcEstado
+ * Se normalizan ambas fechas a medianoche y se usa Math.round para 
+ * evitar errores por milisegundos o zonas horarias.
+ */
 const calcEstado = (venceStr) => {
   if (!venceStr) return 'vencido';
-  const hoy = new Date(); hoy.setHours(0,0,0,0);
-  const v   = new Date(venceStr + 'T00:00:00');
-  const d   = Math.ceil((v - hoy) / 86400000);
+  
+  const hoy = new Date(); 
+  hoy.setHours(0, 0, 0, 0);
+  
+  const v = new Date(venceStr + 'T00:00:00');
+  v.setHours(0, 0, 0, 0);
+  
+  const diffTiempo = v.getTime() - hoy.getTime();
+  const d = Math.round(diffTiempo / (1000 * 60 * 60 * 24));
+
   if (d < 0)  return 'vencido';
   if (d <= 7) return 'proximo';
   return 'al-dia';
@@ -63,12 +75,6 @@ const todayStr = () => new Date().toISOString().split('T')[0];
 
 const claveMes = (fechaStr) => (fechaStr || '').substring(0, 7); // 'YYYY-MM'
 
-/*
-  distribuirPago: distribuye el monto de un pago entre los meses que cubre.
-  - Diario / Mensual → 100% en el mes del pago
-  - Trimestral       → 1/3 por mes durante 3 meses
-  - Anual            → 1/12 por mes durante 12 meses
-*/
 const distribuirPago = (pago) => {
   const fecha   = new Date(pago.fecha + 'T12:00:00');
   const anio0   = fecha.getFullYear();
@@ -290,13 +296,10 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
   const isVencido = calcEstado(client.vence) === 'vencido';
   const estadoAct = calcEstado(client.vence);
 
-  /* Calcular vencimiento base y recargo cada vez que cambian fechaPago o planPago */
   const venceBase = React.useMemo(()=> calcVence(planPago, isVencido ? fechaPago : client.vence), [planPago, fechaPago, isVencido, client.vence]);
 
-  /* Inicializar fechaVence cuando cambia venceBase */
   React.useEffect(()=>{ setFechaVence(venceBase); }, [venceBase]);
 
-  /* Recargo: si el cliente tiene vencimiento previo y fechaPago > vence+5 días */
   React.useEffect(()=>{
     if(!client.vence) return;
     const vencePrev = new Date(client.vence + 'T00:00:00');
@@ -422,7 +425,6 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
           </div>
         )}
 
-        {/* ── MEMBRESÍA ANUAL ─────────────────────────────── */}
         <div style={{background:cobrarAnual?'rgba(245,197,24,0.07)':'var(--gray-900)',border:`1px solid ${cobrarAnual?'rgba(245,197,24,0.35)':'var(--gray-800)'}`,padding:'12px 16px',marginBottom:8,transition:'all 0.2s'}}>
           <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',userSelect:'none'}}>
             <input type="checkbox" checked={cobrarAnual} onChange={e=>setCobrarAnual(e.target.checked)}
@@ -497,12 +499,12 @@ const LoginPage = ({ onLogin }) => {
 };
 
 /* ============================================================
-   DASHBOARD (solo métricas y alertas)
+   DASHBOARD
    ============================================================ */
 const Dashboard = ({ clientes }) => {
-  const activos  = clientes.filter(c=>c.estado!=='vencido').length;
-  const vencidos = clientes.filter(c=>c.estado==='vencido').length;
-  const proximos = clientes.filter(c=>c.estado==='proximo').length;
+  const activos  = clientes.filter(c=>calcEstado(c.vence)!=='vencido').length;
+  const vencidos = clientes.filter(c=>calcEstado(c.vence)==='vencido').length;
+  const proximos = clientes.filter(c=>calcEstado(c.vence)==='proximo').length;
 
   return(
     <div className="fade-up">
@@ -516,19 +518,22 @@ const Dashboard = ({ clientes }) => {
       </div>
 
       <div className="table-title" style={{marginBottom:16}}>Alertas de cobro</div>
-      {clientes.filter(c=>c.estado!=='al-dia').map(c=>(
-        <div key={c.id} className={`alert-card ${c.estado==='proximo'?'warn':''}`}>
-          <div><div className="alert-name">{c.nombre}</div><div className="alert-detail">Plan {c.plan} · Vence {fmtFecha(c.vence)} · {c.telefono}</div></div>
-          <div style={{display:'flex',gap:8}}>
-            <span className={`status-badge ${c.estado}`}>{c.estado==='vencido'?'VENCIDO':'POR VENCER'}</span>
-            <a href={`https://wa.me/${(c.telefono||'').replace(/\D/g,'')}?text=${encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, te recordamos que tu membresia en 504HNfitness esta por vencer.`)}`}
-               target="_blank" rel="noreferrer" className="action-btn" style={{textDecoration:'none',display:'inline-flex',alignItems:'center'}}>
-              WhatsApp
-            </a>
+      {clientes.filter(c=>calcEstado(c.vence)!=='al-dia').map(c=>{
+        const est = calcEstado(c.vence);
+        return (
+          <div key={c.id} className={`alert-card ${est==='proximo'?'warn':''}`}>
+            <div><div className="alert-name">{c.nombre}</div><div className="alert-detail">Plan {c.plan} · Vence {fmtFecha(c.vence)} · {c.telefono}</div></div>
+            <div style={{display:'flex',gap:8}}>
+              <span className={`status-badge ${est}`}>{est==='vencido'?'VENCIDO':'POR VENCER'}</span>
+              <a href={`https://wa.me/${(c.telefono||'').replace(/\D/g,'')}?text=${encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, te recordamos que tu membresia en 504HNfitness esta por vencer.`)}`}
+                 target="_blank" rel="noreferrer" className="action-btn" style={{textDecoration:'none',display:'inline-flex',alignItems:'center'}}>
+                WhatsApp
+              </a>
+            </div>
           </div>
-        </div>
-      ))}
-      {clientes.filter(c=>c.estado!=='al-dia').length===0&&<div style={{color:'var(--gray-700)',fontSize:13,padding:'12px 0'}}>Sin alertas pendientes</div>}
+        );
+      })}
+      {clientes.filter(c=>calcEstado(c.vence)!=='al-dia').length===0&&<div style={{color:'var(--gray-700)',fontSize:13,padding:'12px 0'}}>Sin alertas pendientes</div>}
     </div>
   );
 };
@@ -765,11 +770,6 @@ const PagosPanel = () => {
 
 /* ============================================================
    GANANCIAS POR MES
-   - Ingresos: cada pago distribuido según duración del plan
-     · Diario / Mensual → 100% en el mes del pago
-     · Trimestral       → 1/3 por mes × 3 meses
-     · Anual            → 1/12 por mes × 12 meses
-   - Egresos: total del mes según fecha del egreso
    ============================================================ */
 const GananciasPanel = () => {
   const [pagos,   setPagos]   = useState([]);
@@ -786,7 +786,6 @@ const GananciasPanel = () => {
     });
   },[]);
 
-  /* Construir mapas mensuales */
   const ingresosMap = useMemo(()=>{
     const m={};
     pagos.forEach(p=>{
@@ -803,14 +802,12 @@ const GananciasPanel = () => {
     return m;
   },[egresos]);
 
-  /* Años disponibles (siempre incluir el actual) */
   const aniosDisponibles = useMemo(()=>{
     const claves=[...Object.keys(ingresosMap),...Object.keys(egresosMap)];
     const s=new Set([new Date().getFullYear(),...claves.map(c=>parseInt(c.split('-')[0]))]);
     return [...s].sort((a,b)=>b-a);
   },[ingresosMap,egresosMap]);
 
-  /* Filas del año seleccionado */
   const filas = useMemo(()=>
     MESES_NOMBRES.map((nombre,i)=>{
       const c=`${anio}-${String(i+1).padStart(2,'0')}`;
@@ -827,11 +824,10 @@ const GananciasPanel = () => {
     ganancia:filas.reduce((s,f)=>s+f.ganancia,0),
   };
 
-  /* Barra visual: escalar respecto al máximo del año */
   const maxVal=Math.max(...filas.map(f=>Math.max(f.ingresos,f.egresos)),1);
   const pct=(v)=>Math.round((Math.max(v,0)/maxVal)*100);
 
-  const mesActual=new Date().getMonth(); // 0-indexed
+  const mesActual=new Date().getMonth();
   const anioActual=new Date().getFullYear();
 
   return(
@@ -839,7 +835,6 @@ const GananciasPanel = () => {
       <div className="admin-page-title">GANANCIAS</div>
       <div className="admin-page-sub">Ingresos vs Egresos por mes · Planes distribuidos automáticamente</div>
 
-      {/* Selector de año */}
       <div style={{display:'flex',gap:8,marginBottom:28,flexWrap:'wrap'}}>
         {aniosDisponibles.map(a=>(
           <button key={a} onClick={()=>setAnio(a)} style={{
@@ -858,7 +853,6 @@ const GananciasPanel = () => {
 
       {!loading&&(
         <>
-          {/* Resumen del año */}
           <div className="metrics-grid" style={{marginBottom:32}}>
             <div className="metric-card green fade-up fade-up-1">
               <div className="metric-label">Ingresos {anio}</div>
@@ -879,7 +873,6 @@ const GananciasPanel = () => {
             </div>
           </div>
 
-          {/* Tabla mensual */}
           <div className="table-wrap">
             <div className="table-header">
               <span className="table-title">Desglose mensual {anio}</span>
@@ -927,14 +920,12 @@ const GananciasPanel = () => {
                         </td>
                         <td>
                           <div style={{display:'flex',flexDirection:'column',gap:3}}>
-                            {/* Barra ingresos */}
                             <div style={{display:'flex',alignItems:'center',gap:6}}>
                               <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:9,color:'#68d391',width:10,textAlign:'right'}}>I</span>
                               <div style={{flex:1,height:5,background:'var(--gray-800)',borderRadius:2,overflow:'hidden'}}>
                                 <div style={{width:`${pct(f.ingresos)}%`,height:'100%',background:'var(--green)',borderRadius:2,transition:'width 0.5s ease'}}/>
                               </div>
                             </div>
-                            {/* Barra egresos */}
                             <div style={{display:'flex',alignItems:'center',gap:6}}>
                               <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:9,color:'#fc8181',width:10,textAlign:'right'}}>E</span>
                               <div style={{flex:1,height:5,background:'var(--gray-800)',borderRadius:2,overflow:'hidden'}}>
@@ -962,7 +953,6 @@ const GananciasPanel = () => {
             </div>
           </div>
 
-          {/* Nota sobre prorratio */}
           <div style={{marginTop:20,background:'var(--gray-950)',border:'1px solid var(--gray-900)',padding:'14px 18px',fontSize:12,color:'var(--gray-400)',lineHeight:1.8}}>
             <strong style={{color:'var(--gray-200)',fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.1em',textTransform:'uppercase',fontSize:11}}>Reglas de distribución de ingresos</strong><br/>
             <span style={{color:'#4299e1'}}>● Diario / Mensual</span> — El monto completo se registra en el mes del pago.<br/>
@@ -1107,23 +1097,26 @@ const ClientesPanel = ({ clientes, setClientes }) => {
           <table>
             <thead><tr><th>Nombre</th><th>Plan</th><th>Vence</th><th>Teléfono</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
-              {filtered.map(c=>(
-                <tr key={c.id}>
-                  <td style={{fontWeight:600}}>{c.nombre}</td>
-                  <td style={{color:'var(--gray-400)'}}>{c.plan}</td>
-                  <td style={{color:'var(--gray-400)',fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.05em'}}>{fmtFecha(c.vence)}</td>
-                  <td style={{color:'var(--gray-400)'}}>{c.telefono}</td>
-                  <td><span className={`status-badge ${c.estado}`}>{estadoLabel[c.estado]}</span></td>
-                  <td>
-                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                      <a href={`https://wa.me/${(c.telefono||'').replace(/\D/g,'')}?text=${encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}!`)}`} target="_blank" rel="noreferrer" className="action-btn" style={{textDecoration:'none'}} title="WhatsApp">WA</a>
-                      <button className="action-btn" onClick={()=>setPagoClient(c)} style={{color:'var(--gold)',borderColor:'rgba(245,197,24,0.3)'}} title="Registrar pago">Pago</button>
-                      <button className="action-btn" onClick={()=>openEditForm(c)} style={{color:'#4299e1',borderColor:'rgba(66,153,225,0.3)'}} title="Editar">Edit</button>
-                      <button className="action-btn" onClick={()=>setConfirmId(c.id)} style={{color:'var(--red)',borderColor:'rgba(229,62,62,0.3)'}} title="Eliminar">X</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(c=>{
+                const est = calcEstado(c.vence);
+                return (
+                  <tr key={c.id}>
+                    <td style={{fontWeight:600}}>{c.nombre}</td>
+                    <td style={{color:'var(--gray-400)'}}>{c.plan}</td>
+                    <td style={{color:'var(--gray-400)',fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.05em'}}>{fmtFecha(c.vence)}</td>
+                    <td style={{color:'var(--gray-400)'}}>{c.telefono}</td>
+                    <td><span className={`status-badge ${est}`}>{estadoLabel[est]}</span></td>
+                    <td>
+                      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                        <a href={`https://wa.me/${(c.telefono||'').replace(/\D/g,'')}?text=${encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}!`)}`} target="_blank" rel="noreferrer" className="action-btn" style={{textDecoration:'none'}} title="WhatsApp">WA</a>
+                        <button className="action-btn" onClick={()=>setPagoClient(c)} style={{color:'var(--gold)',borderColor:'rgba(245,197,24,0.3)'}} title="Registrar pago">Pago</button>
+                        <button className="action-btn" onClick={()=>openEditForm(c)} style={{color:'#4299e1',borderColor:'rgba(66,153,225,0.3)'}} title="Editar">Edit</button>
+                        <button className="action-btn" onClick={()=>setConfirmId(c.id)} style={{color:'var(--red)',borderColor:'rgba(229,62,62,0.3)'}} title="Eliminar">X</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {filtered.length===0&&<tr><td colSpan={6} style={{textAlign:'center',padding:'40px',color:'var(--gray-700)'}}>{clientes.length===0?'Sin clientes registrados — agrega el primero':'Sin resultados'}</td></tr>}
             </tbody>
           </table>
