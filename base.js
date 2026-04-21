@@ -282,6 +282,8 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
   const [fechaVence,setFechaVence]= useState('');
   const [recargo,   setRecargo]   = useState(0);
   const [guardando, setGuardando] = useState(false);
+  const [cobrarAnual, setCobrarAnual] = useState(false);
+  const [montoAnual,  setMontoAnual]  = useState(200);
 
   const plan      = PLAN_MAP[planPago];
   const montoBase = plan.monto;
@@ -304,7 +306,8 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
   }, [fechaPago, client.vence]);
 
   const newVence = fechaVence || venceBase;
-  const monto    = montoBase + recargo;
+  const cuotaAnual = cobrarAnual ? parseFloat(montoAnual)||0 : 0;
+  const monto    = montoBase + recargo + cuotaAnual;
 
   const handleConfirmarPago = async () => {
     setGuardando(true);
@@ -325,7 +328,7 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
     onClose();
 
     try {
-      const { doc, receiptNo } = generarPDFRecibo(client, planPago, monto, metodo, fechaPago, newVence, 0, montoBase, recargo);
+      const { doc, receiptNo } = generarPDFRecibo(client, planPago, monto, metodo, fechaPago, newVence, cuotaAnual, montoBase, recargo);
       descargarPDF(doc.output('blob'), receiptNo, client.nombre);
       showToastFn(`Pago registrado. Recibo descargado para ${client.nombre.split(' ')[0]}.`,'ok');
     } catch(err) {
@@ -418,6 +421,30 @@ const PagoModal = ({ client, onClose, onClientUpdated, showToastFn }) => {
             <span>Pago con más de 5 días de retraso — se aplica recargo de <strong>L. 50.00</strong>. Total: <strong>L. {monto.toLocaleString('es-HN')}</strong></span>
           </div>
         )}
+
+        {/* ── MEMBRESÍA ANUAL ─────────────────────────────── */}
+        <div style={{background:cobrarAnual?'rgba(245,197,24,0.07)':'var(--gray-900)',border:`1px solid ${cobrarAnual?'rgba(245,197,24,0.35)':'var(--gray-800)'}`,padding:'12px 16px',marginBottom:8,transition:'all 0.2s'}}>
+          <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',userSelect:'none'}}>
+            <input type="checkbox" checked={cobrarAnual} onChange={e=>setCobrarAnual(e.target.checked)}
+              style={{width:16,height:16,accentColor:'var(--gold)',cursor:'pointer',flexShrink:0}}/>
+            <div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'0.08em',textTransform:'uppercase',color:cobrarAnual?'var(--gold)':'var(--gray-300)'}}>
+                Cobrar membresía anual
+              </div>
+              <div style={{fontSize:11,color:'var(--gray-600)',marginTop:2}}>Cuota adicional de inscripción / renovación anual</div>
+            </div>
+            {cobrarAnual&&<div style={{marginLeft:'auto',fontFamily:"'Bebas Neue',sans-serif",fontSize:20,color:'var(--gold)',lineHeight:1}}>+ L. {(parseFloat(montoAnual)||0).toLocaleString('es-HN')}</div>}
+          </label>
+          {cobrarAnual&&(
+            <div style={{marginTop:12,display:'flex',alignItems:'center',gap:10}}>
+              <label style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,letterSpacing:'0.12em',textTransform:'uppercase',color:'var(--gray-600)',whiteSpace:'nowrap'}}>Monto L.</label>
+              <input type="number" className="field-input" value={montoAnual} min="0" step="1"
+                onChange={e=>setMontoAnual(e.target.value)}
+                style={{width:120,border:'1px solid rgba(245,197,24,0.4)',background:'var(--gold-bg)',fontFamily:"'Bebas Neue',sans-serif",fontSize:20,color:'var(--gold)',padding:'6px 10px'}}/>
+              <span style={{fontSize:12,color:'var(--gray-600)'}}>Por defecto L. 200 — cámbialo si aplica.</span>
+            </div>
+          )}
+        </div>
 
         <div className="modal-actions">
           <button className="btn-primary" onClick={handleConfirmarPago} disabled={guardando}>
@@ -639,6 +666,9 @@ const EgresosPanel = () => {
 const PagosPanel = () => {
   const [pagos,setPagos]=useState([]); const [loading,setLoading]=useState(true);
   const [search,setSearch]=useState(''); const [filtroPlan,setFiltroPlan]=useState('Todos');
+  const [confirmPagoId,setConfirmPagoId]=useState(null); const [deletingPago,setDeletingPago]=useState(false);
+  const [toast,setToast]=useState(null);
+  const showToast=(msg,tipo='ok')=>{setToast({msg,tipo});setTimeout(()=>setToast(null),4000);};
   useEffect(()=>{ db.from('pagos').select('*').order('created_at',{ascending:false}).then(({data,error})=>{if(!error)setPagos(data||[]);setLoading(false);}); },[]);
   const filtered=pagos.filter(p=>{
     const ms=p.cliente_nombre.toLowerCase().includes(search.toLowerCase());
@@ -647,8 +677,37 @@ const PagosPanel = () => {
   });
   const totalFiltrado=filtered.reduce((s,p)=>s+parseFloat(p.monto||0),0);
   const COL={'Efectivo':'#68d391','Transferencia bancaria':'#63b3ed','Tarjeta de debito':'#b794f4','Tarjeta de credito':'#fc8181','Tigo Money':'#f5c518','Otro':'#a1a1aa'};
+
+  const handleEliminarPago=async()=>{
+    setDeletingPago(true);
+    const{error}=await db.from('pagos').delete().eq('id',confirmPagoId);
+    setDeletingPago(false);
+    if(!error){setPagos(pagos.filter(p=>p.id!==confirmPagoId));setConfirmPagoId(null);showToast('Pago eliminado correctamente');}
+    else{showToast('Error al eliminar el pago','error');console.error(error);}
+  };
+
+  const pagoAEliminar=pagos.find(p=>p.id===confirmPagoId);
+
   return(
     <div className="fade-up">
+      {toast&&<Toast msg={toast.msg} tipo={toast.tipo} onClose={()=>setToast(null)}/>}
+
+      {confirmPagoId&&pagoAEliminar&&(
+        <div className="modal-overlay" onClick={()=>setConfirmPagoId(null)}>
+          <div className="modal-box" onClick={e=>e.stopPropagation()}>
+            <div className="modal-title">ELIMINAR PAGO?</div>
+            <div className="modal-subtitle">Esta accion no se puede deshacer.</div>
+            <p style={{fontSize:14,color:'var(--white)',marginBottom:8}}>Pago de <strong style={{color:'var(--gold)'}}>{pagoAEliminar.cliente_nombre}</strong></p>
+            <p style={{fontSize:13,color:'var(--gray-400)'}}>Plan {pagoAEliminar.plan} · L. {fmtMonto(pagoAEliminar.monto)} · {fmtFecha(pagoAEliminar.fecha)}</p>
+            <p style={{fontSize:12,color:'#fc8181',marginTop:8}}>⚠ Solo se elimina el registro del pago. La membresía del cliente no se modifica automaticamente.</p>
+            <div className="modal-actions">
+              <button className="btn-danger" onClick={handleEliminarPago} disabled={deletingPago}>{deletingPago?'Eliminando...':'Si, eliminar pago'}</button>
+              <button className="btn-outline" onClick={()=>setConfirmPagoId(null)} disabled={deletingPago}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="admin-page-title">HISTORIAL DE PAGOS</div>
       <div className="admin-page-sub">{pagos.length} transacciones registradas en Supabase</div>
       {!loading&&(
@@ -674,7 +733,7 @@ const PagosPanel = () => {
         </div>
         <div style={{overflowX:'auto'}}>
           <table>
-            <thead><tr><th>Fecha</th><th>Cliente</th><th>Plan</th><th>Monto (L.)</th><th>Método</th><th>Válido hasta</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Cliente</th><th>Plan</th><th>Monto (L.)</th><th>Método</th><th>Válido hasta</th><th>Acciones</th></tr></thead>
             <tbody>
               {!loading&&filtered.map(p=>(
                 <tr key={p.id}>
@@ -684,14 +743,18 @@ const PagosPanel = () => {
                   <td style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:20,color:'var(--green)'}}>L. {fmtMonto(p.monto)}</td>
                   <td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',color:COL[p.metodo]||'var(--gray-400)',background:(COL[p.metodo]||'#888')+'18',padding:'3px 8px'}}>{p.metodo}</span></td>
                   <td style={{color:'var(--gold)',fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmtFecha(p.vence_hasta)}</td>
+                  <td>
+                    <button className="action-btn" onClick={()=>setConfirmPagoId(p.id)}
+                      style={{color:'var(--red)',borderColor:'rgba(229,62,62,0.3)'}} title="Eliminar pago">Eliminar</button>
+                  </td>
                 </tr>
               ))}
-              {!loading&&filtered.length===0&&<tr><td colSpan={6} style={{textAlign:'center',padding:'40px',color:'var(--gray-700)'}}>{pagos.length===0?'Sin pagos registrados':'Sin resultados'}</td></tr>}
-              {loading&&<tr><td colSpan={6} style={{textAlign:'center',padding:'40px',color:'var(--gray-700)'}}>Cargando...</td></tr>}
+              {!loading&&filtered.length===0&&<tr><td colSpan={7} style={{textAlign:'center',padding:'40px',color:'var(--gray-700)'}}>{pagos.length===0?'Sin pagos registrados':'Sin resultados'}</td></tr>}
+              {loading&&<tr><td colSpan={7} style={{textAlign:'center',padding:'40px',color:'var(--gray-700)'}}>Cargando...</td></tr>}
             </tbody>
             {!loading&&filtered.length>0&&<tfoot><tr>
               <td colSpan={3} style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:'0.15em',textTransform:'uppercase',color:'var(--gray-400)'}}>TOTAL {filtroPlan!=='Todos'?`· ${filtroPlan}`:''}</td>
-              <td colSpan={3} style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:24,color:'var(--green)'}}>L. {fmtMonto(totalFiltrado)}</td>
+              <td colSpan={4} style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:24,color:'var(--green)'}}>L. {fmtMonto(totalFiltrado)}</td>
             </tr></tfoot>}
           </table>
         </div>
