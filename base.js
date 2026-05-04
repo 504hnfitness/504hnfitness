@@ -11,7 +11,7 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* ─── PLANES ─────────────────────────────────────────── */
 const PLANES = [
-  { nombre:'Diario',     monto:50,   duracion:'1 dia',    meses:1,  color:'#4299e1' },
+  { nombre:'Diario',     monto:100,   duracion:'1 dia',    meses:1,  color:'#4299e1' },
   { nombre:'Mensual',    monto:500,  duracion:'1 mes',    meses:1,  color:'#38a169' },
   { nombre:'Quincenal',  monto:300,  duracion:'15 dias',  meses:1,  color:'#805ad5' },
   { nombre:'Anual',      monto:4800, duracion:'12 meses', meses:12, color:'#f5c518' },
