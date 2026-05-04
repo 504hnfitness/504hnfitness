@@ -164,10 +164,10 @@ const generarPDFRecibo = (client, planPago, monto, metodo, fecha, venceActualiza
   fila('Plan de membresia', planPago);
   fila('Duracion del plan', PLAN_MAP[planPago]?.duracion || '—');
   fila('Fecha de pago', fmtFechaLarga(fecha));
-  fila('Membresia valida hasta', fmtFechaLarga(venceActualizado), [38,161,105]);
+  fila('Mensualidad valida hasta', fmtFechaLarga(venceActualizado), [38,161,105]);
   fila('Metodo de pago', metodo);
   if(cuotaInscripcion>0){
-    fila('Membresia mensual', 'L. ' + fmtMonto(montoBase));
+    fila('Pago mensual', 'L. ' + fmtMonto(montoBase));
     fila('Cuota de inscripcion anual', 'L. ' + fmtMonto(cuotaInscripcion), [245,197,24]);
   }
   if(recargoPDF>0){
@@ -182,7 +182,7 @@ const generarPDFRecibo = (client, planPago, monto, metodo, fecha, venceActualiza
   doc.setFont('helvetica','bold');
   doc.setFontSize(9);
   doc.setTextColor(56,161,105);
-  doc.text('PAGO CONFIRMADO - MEMBRESIA RENOVADA', pad+4, y+6);
+  doc.text('PAGO CONFIRMADO - MENSUALIDAD RENOVADA', pad+4, y+6);
   y += 18;
 
   doc.setFillColor(10,10,10);
@@ -208,7 +208,7 @@ const generarPDFRecibo = (client, planPago, monto, metodo, fecha, venceActualiza
   doc.setFont('helvetica','normal');
   doc.setFontSize(8.5);
   doc.setTextColor(160,160,160);
-  doc.text('Gracias por tu membresia! Este documento es un comprobante oficial de pago.', W/2, y, { align:'center' });
+  doc.text('Gracias por tu Mensualidad! Este documento es un comprobante oficial de pago.', W/2, y, { align:'center' });
   y += 6;
   doc.text('Consultas: contacto@504hnfitness.com', W/2, y, { align:'center' });
 
