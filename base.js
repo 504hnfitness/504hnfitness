@@ -227,7 +227,7 @@ const descargarPDF = (blob, receiptNo, nombre) => {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 };
 
-const FORM_EMPTY = { nombre:'', plan:'Mensual', telefono:'', metodo:'Efectivo', fechaIngreso:new Date().toISOString().split('T')[0] };
+const FORM_EMPTY = { nombre:'', plan:'Mensual', telefono:'', metodo:'Efectivo', fechaIngreso:new Date().toISOString().split('T')[0], cobrarInscripcion:true, montoInscripcion:200 };
 
 /* ============================================================
    LOADING SCREEN
@@ -993,14 +993,17 @@ const ClientesPanel = ({ clientes, setClientes }) => {
       else{showToast('Error al actualizar','error');console.error(error);}
       setForm(FORM_EMPTY);setShowForm(false);setFormMode('add');setEditId(null);
     } else {
-      const hoy=form.fechaIngreso||todayStr(); const vence=calcVence(form.plan, hoy); const monto=PLAN_MAP[form.plan]?.monto||0;
+      const hoy=form.fechaIngreso||todayStr(); const vence=calcVence(form.plan, hoy);
+      const montoBase=PLAN_MAP[form.plan]?.monto||0;
+      const cuotaInscripcion=form.cobrarInscripcion?(parseFloat(form.montoInscripcion)||0):0;
+      const monto=montoBase+cuotaInscripcion;
       const{data:c,error:cErr}=await db.from('clientes').insert([{nombre:form.nombre,plan:form.plan,telefono:form.telefono,estado:'al-dia',vence}]).select().single();
       if(cErr){setSaving(false);showToast('Error al crear el cliente','error');console.error(cErr);return;}
       await db.from('pagos').insert([{cliente_id:c.id,cliente_nombre:c.nombre,plan:form.plan,monto,metodo:form.metodo,fecha:hoy,vence_hasta:vence}]);
       setClientes([c,...clientes]); setSaving(false); setForm(FORM_EMPTY); setShowForm(false);
       showToast(`${c.nombre} registrado. Descargando recibo...`,'ok');
       try{
-        const{doc,receiptNo}=generarPDFRecibo(c,form.plan,monto,form.metodo,hoy,vence);
+        const{doc,receiptNo}=generarPDFRecibo(c,form.plan,monto,form.metodo,hoy,vence,cuotaInscripcion,montoBase,0);
         descargarPDF(doc.output('blob'),receiptNo,c.nombre);
         showToast(`Recibo de ${c.nombre.split(' ')[0]} descargado.`,'ok');
       }catch(err){console.error(err);showToast('Cliente creado, error al generar PDF.','warn');}
@@ -1070,8 +1073,32 @@ const ClientesPanel = ({ clientes, setClientes }) => {
               )}
             </div>
             {formMode==='add'&&(
+              <div style={{background:form.cobrarInscripcion?'rgba(245,197,24,0.07)':'var(--gray-900)',border:`1px solid ${form.cobrarInscripcion?'rgba(245,197,24,0.35)':'var(--gray-800)'}`,padding:'12px 16px',marginTop:16,transition:'all 0.2s'}}>
+                <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',userSelect:'none'}}>
+                  <input type="checkbox" checked={form.cobrarInscripcion} onChange={e=>setForm({...form,cobrarInscripcion:e.target.checked})}
+                    style={{width:16,height:16,accentColor:'var(--gold)',cursor:'pointer',flexShrink:0}}/>
+                  <div>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'0.08em',textTransform:'uppercase',color:form.cobrarInscripcion?'var(--gold)':'var(--gray-300)'}}>
+                      Cobrar inscripción (L. {(parseFloat(form.montoInscripcion)||0).toLocaleString('es-HN')})
+                    </div>
+                    <div style={{fontSize:11,color:'var(--gray-600)',marginTop:2}}>Cuota de inscripción para cliente nuevo</div>
+                  </div>
+                  {form.cobrarInscripcion&&<div style={{marginLeft:'auto',fontFamily:"'Bebas Neue',sans-serif",fontSize:20,color:'var(--gold)',lineHeight:1}}>+ L. {(parseFloat(form.montoInscripcion)||0).toLocaleString('es-HN')}</div>}
+                </label>
+                {form.cobrarInscripcion&&(
+                  <div style={{marginTop:12,display:'flex',alignItems:'center',gap:10}}>
+                    <label style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,letterSpacing:'0.12em',textTransform:'uppercase',color:'var(--gray-600)',whiteSpace:'nowrap'}}>Monto L.</label>
+                    <input type="number" className="field-input" value={form.montoInscripcion} min="0" step="1"
+                      onChange={e=>setForm({...form,montoInscripcion:e.target.value})}
+                      style={{width:120,border:'1px solid rgba(245,197,24,0.4)',background:'var(--gold-bg)',fontFamily:"'Bebas Neue',sans-serif",fontSize:20,color:'var(--gold)',padding:'6px 10px'}}/>
+                    <span style={{fontSize:12,color:'var(--gray-600)'}}>Por defecto L. 200 — cámbialo si aplica.</span>
+                  </div>
+                )}
+              </div>
+            )}
+            {formMode==='add'&&(
               <div style={{display:'flex',flexWrap:'wrap',gap:20,background:'var(--gold-bg)',border:'1px solid rgba(245,197,24,0.2)',padding:'14px 18px',marginTop:16}}>
-                <div><div style={{fontSize:9,color:'var(--gray-700)',marginBottom:3,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.15em',textTransform:'uppercase'}}>Primer pago</div><div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:24,color:'var(--gold)',lineHeight:1}}>L. {(PLAN_MAP[form.plan]?.monto||0).toLocaleString('es-HN')}</div></div>
+                <div><div style={{fontSize:9,color:'var(--gray-700)',marginBottom:3,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.15em',textTransform:'uppercase'}}>Primer pago</div><div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:24,color:'var(--gold)',lineHeight:1}}>L. {((PLAN_MAP[form.plan]?.monto||0)+(form.cobrarInscripcion?(parseFloat(form.montoInscripcion)||0):0)).toLocaleString('es-HN')}</div></div>
                 <div><div style={{fontSize:9,color:'var(--gray-700)',marginBottom:3,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.15em',textTransform:'uppercase'}}>Duración</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:'var(--white)'}}>{PLAN_MAP[form.plan]?.duracion}</div></div>
                 <div><div style={{fontSize:9,color:'var(--gray-700)',marginBottom:3,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:'0.15em',textTransform:'uppercase'}}>Válido hasta</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:'var(--gold)'}}>{fmtFecha(vencePreview)}</div></div>
               </div>
