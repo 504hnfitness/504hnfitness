@@ -12,8 +12,8 @@
   <!-- Babel (transpila JSX sin build step) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Supabase (versión UMD explícita: la URL genérica @2 ahora apunta a ESM y rompe en script clásico) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <!-- Supabase (UMD vía unpkg, build clásica compatible con <script> sin type="module") -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
   <!-- jsPDF — generación de recibos en PDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
